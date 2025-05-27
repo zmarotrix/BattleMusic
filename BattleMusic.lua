@@ -1,7 +1,11 @@
-﻿local _G, _ = _G or getfenv()
-local inCombat = false
+﻿-- BattleMusic Addon
+
+local _G, _ = _G or getfenv()
 local lingering = false
-local timeLinger
+local emptywarning = false
+local isLingerActive = false
+local isMusicPlaying = false
+local lingerHandler = nil
 
 -- Settings
 local CONFIG_FRAME_NAME = "bmusic_config"
@@ -10,132 +14,122 @@ local INPUT_HEIGHT = 20
 local INPUT_WIDTH = 156
 local SPACING_X = 18
 local SPACING_Y = 45
-local emptywarning = false
 
+local playlist = {}
+local playlistLength = table.getn(playlist)
 
-function BattleMusic_OnLoad()
+-- On addon loaded
+local addonLoaded = CreateFrame("Frame")
+addonLoaded:RegisterEvent("ADDON_LOADED")
+addonLoaded:SetScript("OnEvent", function()
+    if arg1 == "BattleMusic" then
+        if battleMusic == nil then
+            battleMusic = {}
+            battleMusic.track = false
+            battleMusic.linger = 5
+            battleMusic.debug = false
+        end
 
-    math.randomseed(time())
-	
-	local playlist = {}       
-	local playlistLength = table.getn(playlist)
-	
-	
-	local addonLoaded = CreateFrame("Frame") 
-		addonLoaded:RegisterEvent("ADDON_LOADED")
-		addonLoaded:SetScript("OnEvent", function()
-		
-		if(battleMusic == nil) then
-                battleMusic={}
-				battleMusic.track = false
-                battleMusic.linger = 0
-				battleMusic.debug = false
+        CONFIG_SETTINGS_BMUSIC = {
+            [1] = {"Display Track Name in Chat", "bm_track", battleMusic.track, false, "track"},
+            [2] = {"Linger time (seconds)", "bm_lingerTime", battleMusic.linger, 5, "linger"},
+            [3] = {"Display Debug Info in Chat", "bm_debug", battleMusic.debug, false, "debug"},
+        }
+    end
+end)
+
+-- Zone change stops music
+local zoneChange = CreateFrame("Frame")
+zoneChange:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+zoneChange:SetScript("OnEvent", function()
+    StopMusic()
+    isMusicPlaying = false
+    if battleMusic.debug then
+        DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Loading Screen Clear", 1, 0, 1)
+    end
+end)
+
+-- Combat start
+local combatStart = CreateFrame("Frame")
+combatStart:RegisterEvent("PLAYER_REGEN_DISABLED")
+combatStart:SetScript("OnEvent", function()
+    if isLingerActive and lingerHandler then
+        if battleMusic.debug then
+            DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Combat resumed. Cancelling lingering stop.", 1, 0, 1)
+        end
+        lingerHandler:SetScript("OnUpdate", nil)
+        isLingerActive = false
+        lingering = false
+    end
+
+    if playlistLength <= 0 and not emptywarning then
+        DEFAULT_CHAT_FRAME:AddMessage("BattleMusic ERROR: No songs in playlist!", 1, 0, 0)
+         DEFAULT_CHAT_FRAME:AddMessage("Be sure to add your .mp3 files to Interface\\AddOns\\BattleMusic\\music\\ and run the playlist updater.")
+        emptywarning = true
+    end
+
+    if not isMusicPlaying and playlistLength > 0 then
+        local a = math.random(1, playlistLength)
+        local b = [[Interface\AddOns\BattleMusic\music\]] .. playlist[a]
+
+        if battleMusic.track then
+            DEFAULT_CHAT_FRAME:AddMessage("Playing track: " .. playlist[a])
+        end
+
+        if battleMusic.debug then
+            DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Number of Tracks: " .. playlistLength, 1, 0, 1)
+            DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Track Number Selected: " .. a, 1, 0, 1)
+            DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: File Path: " .. b, 1, 0, 1)
+        end
+
+        PlayMusic(b)
+        isMusicPlaying = true
+    end
+
+    if battleMusic.linger > 0 then
+        lingering = true
+    end
+end)
+
+-- Combat end
+local combatEnd = CreateFrame("Frame")
+combatEnd:RegisterEvent("PLAYER_REGEN_ENABLED")
+combatEnd:SetScript("OnEvent", function()
+    if battleMusic.linger <= 0 then
+        StopMusic()
+        isMusicPlaying = false
+        if battleMusic.debug then
+            DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: No Linger. Ending Music.", 1, 0, 1)
+        end
+    else
+        if not lingerHandler then
+            lingerHandler = CreateFrame("Frame")
+        end
+
+        local lingerStartTime = GetTime()
+        local lingerDuration = battleMusic.linger
+        local lingerDebugShown = false
+        isLingerActive = true
+
+        lingerHandler:SetScript("OnUpdate", function(self, elapsed)
+            if battleMusic.debug and not lingerDebugShown then
+                DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Combat Ended. Lingering for " .. lingerDuration .. " seconds", 1, 0, 1)
+                lingerDebugShown = true
             end
-			
-            CONFIG_SETTINGS_BMUSIC = {
-				[1] = {"Display Track Name in Chat", "bm_track", battleMusic.track, false, "track"},
-                --[2] = {"Linger time (seconds) ", "bm_lingerTime", battleMusic.linger, 0, "linger"},
-				[3] = {"Display Debug Info in Chat", "bm_debug", battleMusic.debug, false, "debug"},
-            }
-		end)
-	
-	
-	
-	local zoneChange = CreateFrame("Frame")
-		zoneChange:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-		
-		zoneChange:SetScript("OnEvent", function()
-		
-			if event == "ZONE_CHANGED_NEW_AREA" then
-				StopMusic()
-			end
-			
-			if battleMusic.debug then
-				DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Loading Screen Clear", 1, 0, 1);
-			end
-			
-		end)
 
-
-
-	local combatStart = CreateFrame("Frame")
-		combatStart:RegisterEvent("PLAYER_REGEN_DISABLED")
-		combatStart:SetScript("OnEvent", function()
-		
-			if playlistLength <= 0 and emptywarning == false then 
-				DEFAULT_CHAT_FRAME:AddMessage("BattleMusic ERROR: There are no songs in the playlist!", 1, 0, 0)
-				DEFAULT_CHAT_FRAME:AddMessage("Be sure to add your .mp3 files to Interface\\AddOns\\BattleMusic\\music\\ and run the playlist updater.")
-				emptywarning = true
-			end
-			
-			
-			
-			if(lingering == false and playlistLength > 0) then
-				local a = math.random(1,playlistLength); 
-				local b = [[Interface\AddOns\BattleMusic\music\]]..playlist[a]; 
-			
-				if battleMusic.track then
-					DEFAULT_CHAT_FRAME:AddMessage("Playing track: "..playlist[a]); 
-				end
-				
-				if battleMusic.debug then
-					DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Number of Tracks: "..playlistLength, 1, 0, 1)
-					DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Track Number Selected: "..a, 1, 0, 1)
-					DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: File Path: "..b, 1, 0, 1);
-				end
-		
-				PlayMusic(b);
-			end
-			
-			if battleMusic.linger > 0 then
-				lingering = true
-			end
-			
-		end)
-		
-		
-	local combatEnd = CreateFrame("Frame")
-		combatEnd:RegisterEvent("PLAYER_REGEN_ENABLED")
-		combatEnd:SetScript("OnEvent", function()
-		
-		battleMusic.linger = 0 -- I don't know how to get this to work. 
-		
-			if(battleMusic.linger <= 0)then
-				StopMusic()
-				
-				if battleMusic.debug then
-					DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: No Linger. Ending Music.", 1, 0, 1);
-				end
-				
-			else --None of this shit works and I don't know why. Someone else fix it if you want this feature.
-				lingerHandler = CreateFrame("Frame")
-					lingerStartTime = GetTime();
-					local lingerdebug = true
-					
-					lingerHandler:SetScript("OnUpdate", function(self, elapsed)
-						if battleMusic.debug and lingerdebug then
-							DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Combat Ended. Lingering for "..battleMusic.linger.." seconds", 1, 0, 1);
-							lingerdebug = false
-						end
-		
-						if GetTime() - lingerStartTime >= battleMusic.linger then
-							StopMusic()
-							
-							lingerdebug = true
-							
-							if battleMusic.debug then
-								DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Linger ended after "..GetTime() - lingerStartTime.." seconds", 1, 0, 1);
-							end
-							
-							lingerHandler:Hide()
-							
-						end
-					end)
-				lingerHandler:SetScript("OnUpdate", nil)
+            if GetTime() - lingerStartTime >= lingerDuration then
+                StopMusic()
+                isMusicPlaying = false
+                if battleMusic.debug then
+                    DEFAULT_CHAT_FRAME:AddMessage("[DEBUG]: Linger ended after " .. lingerDuration .. " seconds", 1, 0, 1)
+                end
+                lingerHandler:SetScript("OnUpdate", nil)
+                lingering = false
+                isLingerActive = false
             end
-        end)     
-end	
-
+        end)
+    end
+end)
 
 local function CreateCheckbox(text, name, column, row, data, isColor)
 
@@ -208,6 +202,8 @@ local function ResetData()
     end
 end
 
+
+--CONFIG FRAME--
 
 local function CreateInputField(text, name, column, row, data, isColor)
     
@@ -291,9 +287,10 @@ SlashCmdList["BMUSIC"] = function(self, txt)
             insets={left=8, right=8, top=8, bottom=8}
         })
         config_frame:SetBackdropColor(
-            0.4,
-            0.4,
-            0.4
+            0.1,
+            0.1,
+            0.1,
+            0.8
         )
 
         local close_button = CreateFrame("Button", CONFIG_FRAME_NAME.."_close_button", config_frame, "UIPanelCloseButton")
@@ -304,6 +301,7 @@ SlashCmdList["BMUSIC"] = function(self, txt)
         save_button:SetText("Save")
         save_button:SetScript("OnClick", function()
             SaveData()
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00BattleMusic settings saved.|r")
         end)
 
         local reset_button = CreateFrame("Button", CONFIG_FRAME_NAME.."_reset_button", config_frame, "OptionsButtonTemplate")
@@ -343,3 +341,6 @@ SlashCmdList["BMUSIC"] = function(self, txt)
     end
 
 end
+
+DEFAULT_CHAT_FRAME:AddMessage("|cffff0000BattleMusic|r |cffccccccLoaded|r |cffff0000!|r |cff888888(Type |cffffff00/bmusic|cff888888 to configure.)|r")
+
