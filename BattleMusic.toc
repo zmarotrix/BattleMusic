@@ -8,4 +8,3 @@
 ## SavedVariablesPerCharacter: battleMusic
 ## Dependencies:
 BattleMusic.lua
-BattleMusic.xml
